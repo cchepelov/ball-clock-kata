@@ -352,8 +352,7 @@ class BallClockSpec extends  AsyncFlatSpec with  Matchers with ZioTestAdapter wi
   "BallClock loaded with 30 balls" should "cycle after 15 days" in zTest {
     for {
       clock <- BallClock().load(30)
-      rawDuration <- clock.countUntilCycle()
-      duration = rawDuration.plusMinutes(1)
+      duration <- clock.countUntilCycle()
     } yield {
       duration shouldBe >= (Duration.ofDays(15))
       duration shouldBe <(Duration.ofDays(16))
@@ -363,8 +362,7 @@ class BallClockSpec extends  AsyncFlatSpec with  Matchers with ZioTestAdapter wi
   "BallClock loaded with 45 balls" should "cycle after 378 days" in zTest {
     for {
       clock <- BallClock().load(45)
-      rawDuration <- clock.countUntilCycle()
-      duration = rawDuration.plusMinutes(1)
+      duration <- clock.countUntilCycle()
     } yield {
       duration shouldBe >=(Duration.ofDays(378))
       duration shouldBe <(Duration.ofDays(379))

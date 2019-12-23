@@ -201,13 +201,18 @@ object BallClock {
 
   private def runUntilLikeStartOrError[R, E, A](start: A, stepIO: A => ZIO[R, E, A], stopCondition: A => Boolean) =
     Schedule
-      .unfoldM(stepIO(start).either) {
+      .unfoldM(stepIO(start).traced.either) {
         case error @ Left(_) => UIO(error)
         case Right(state) => stepIO(state).either
       }
       .untilOutput {
-        case Left(_) => true
-        case Right(state) => stopCondition(state)
+        case Left(_) =>
+          true
+        case Right(state) =>
+          if (stopCondition(state)) {
+            true
+          } else false
+
       }
 
 
@@ -218,11 +223,23 @@ object BallClock {
       } else if (minutes == 1) {
         this.tick
       } else {
-        val schedule = Schedule.recurs(minutes - 1) *> runUntilLikeStartOrError(this, (_: Runnable).tick, (_: Runnable) == this)
+        val schedule = {
+          def nextTick(r: BallClock.Runnable, count: Int) = r.tick.map(nr => nr -> (count + 1))
+          def stopCond(r: BallClock.Runnable, count: Int) = count == minutes
 
-        val result = ZIO.unit.repeat(schedule)
-          .flatMap(x => IO.fromEither(x))
+          runUntilLikeStartOrError[Any, KataError, (BallClock.Runnable, Int)]((this, 0),
+            _ match { case (r, count) => nextTick(r, count) },
+            _ match { case (r, count) => stopCond(r, count) })
+        }
 
+        val result = for {
+          repetitionResult <- ZIO.unit.repeat(schedule)
+          resultItem <- IO.fromEither(repetitionResult)
+
+        } yield {
+          val (resultBallClock, _) = resultItem
+          resultBallClock
+        }
         result
       }
     }
@@ -230,12 +247,20 @@ object BallClock {
     def countUntilCycle(): IO[KataError, Duration] = {
 
 
-      val schedule = runUntilLikeStartOrError(this, (_: Runnable).tick, (_:Runnable) == this) && Schedule.forever
+      val schedule = {
+        def nextTick(r: BallClock.Runnable, count: Int) = r.tick.map(nr => nr -> (count + 1))
+        def stopCond(r: BallClock.Runnable, count: Int) = this == r
+
+        runUntilLikeStartOrError[Any, KataError, (BallClock.Runnable, Int)]((this, 0),
+          _ match { case (r, count) => nextTick(r, count) },
+          _ match { case (r, count) => stopCond(r, count) })
+      }
+
 
       val result = ZIO.unit.repeat(schedule)
         .flatMap {
-          case (Left(error), _) => IO.fail(error)
-          case (Right(_), minutes) => IO.succeed(Duration.ofMinutes(minutes))
+          case (Left(error)) => IO.fail(error)
+          case (Right((_, minutes))) => IO.succeed(Duration.ofMinutes(minutes + 1))
         }
 
       result
