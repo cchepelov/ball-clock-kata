@@ -70,11 +70,11 @@ object BallClockApp extends App {
   }
 
 
-  val program: ZIO[Console with Clock, Any, Unit] = {
+  def runInteractive(ballCount: Int): ZIO[Console with Clock, Any, Unit] = {
     ZIO.accessM[Clock with Console] { env =>
       for {
         time <- env.clock.currentDateTime
-        ballClock <- BallClock().loadWithCurrentTime(time.toLocalTime, 27)
+        ballClock <- BallClock().loadWithCurrentTime(time.toLocalTime, ballCount)
 
         refTimeClock <- Ref.make( (time, ballClock) )
 
@@ -84,14 +84,62 @@ object BallClockApp extends App {
       }
 
     }
+  }
 
+  def cycleDuration(ballCount: Int): ZIO[Console, Any, Unit] = {
+    ZIO.accessM[Console] { env =>
+      for {
+        ballclock <- BallClock().load(ballCount)
+        duration <- ballclock.countUntilCycle()
 
-
+        _ <- env.console.putStrLn(s"${ballCount} cycle after ${duration.toDays} days.  (precisely: ${duration})")
+      } yield {
+        ()
+      }
+    }
   }
 
 
+  def cyclesAsJson(ballCount: Int, minutes: Int): ZIO[Console, Any, Unit] = {
+    ZIO.accessM[Console] { env =>
+      for {
+        ballclock <- BallClock().load(ballCount)
+        state <- ballclock.runCycles(minutes)
+
+        _ <- env.console.putStrLn(s"${ballCount} cycle after ${minutes} minutes:")
+        _ <- env.console.putStrLn(state.toString /* FIXME: as JSON !! */)
+      } yield {
+        ()
+      }
+    }
+  }
+
+
+  def program(args: List[String]): ZIO[Console with Clock, Any, Unit] =
+    args match {
+      case List("-r") | Nil => runInteractive(27)
+      case List("-r", ballQty) => IO.effect(ballQty.toInt).map(runInteractive)
+
+      case List(ballQtyStr) => for {
+        ballQty <- IO.effect(ballQtyStr.toInt)
+        _ <- cycleDuration(ballQty)
+      } yield {
+        ()
+      }
+
+      case List(ballQtyStr, minutesStr) => for {
+        ballQty <- IO.effect(ballQtyStr.toInt)
+        minutes <- IO.effect(minutesStr.toInt)
+
+        _ <- cyclesAsJson(ballQty, minutes)
+      } yield {
+        ()
+      }
+    }
+
   def run(args: List[String]): ZIO[ZEnv, Nothing, Int] =
-    program.foldM(
+
+    program(args).foldM(
       error => console.putStrLn(s"Execution failed with: $error") *> ZIO.succeed(1)
       , _ => ZIO.succeed(0)
     )
