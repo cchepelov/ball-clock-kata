@@ -33,7 +33,7 @@ libraryDependencies ++= Seq(
   "dev.zio" %% "zio" % zioVersion,
   "dev.zio" %% "zio-streams" % zioVersion,
 
-  "com.propensive" %% "kaleidoscope" % "0.1.0",
+  "com.typesafe.play" %% "play-json" % "2.8.1",
 )
 
 libraryDependencies ++= Seq(

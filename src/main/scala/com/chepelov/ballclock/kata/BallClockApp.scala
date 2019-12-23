@@ -2,6 +2,7 @@ package com.chepelov.ballclock.kata
 
 import java.time.{Duration, OffsetDateTime}
 
+import play.api.libs.json.Json
 import zio.clock.Clock
 import zio.{App, IO, Ref, Schedule, UIO, ZEnv, ZIO, console}
 import zio.console.Console
@@ -107,7 +108,7 @@ object BallClockApp extends App {
         state <- ballclock.runCycles(minutes)
 
         _ <- env.console.putStrLn(s"${ballCount} cycle after ${minutes} minutes:")
-        _ <- env.console.putStrLn(state.toString /* FIXME: as JSON !! */)
+        _ <- env.console.putStrLn(Json.toJson(state).toString())
       } yield {
         ()
       }

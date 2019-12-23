@@ -8,6 +8,8 @@ import cats.instances.order
 import cats.implicits._
 import cats.Monoid
 import com.chepelov.ballclock.kata
+import play.api.libs.json
+import play.api.libs.json.{JsArray, JsObject, JsValue, Writes}
 import zio.stream.ZStream
 
 import scala.annotation.tailrec
@@ -283,7 +285,19 @@ object BallClock {
         this.copy(stages = newStages, end = newEnd)
       }
     }
+  }
+  object Runnable {
+    implicit object WritesRunnable extends Writes[Runnable] {
+      override def writes(o: Runnable): JsValue = {
+        val stageJson = (o.stages.map(stage => stage.name -> stage.moving.reverse) :+
+          (o.end.name -> o.end.contents.reverse.to[List]))
+            .map {
+              case (name, balls) => name -> JsArray(balls.map(implicitly[Writes[Ball]].writes))
+            }
 
+        JsObject(stageJson)
+      }
+    }
   }
 
 
@@ -296,4 +310,15 @@ object BallClock {
       Nil,
       Accumulator.Static.Empty("Main")
     )
+
+
+  implicit object WritesBallClock extends Writes[BallClock] {
+    override def writes(o: BallClock): JsValue = o match {
+      case r: BallClock.Runnable =>
+        implicitly[Writes[BallClock.Runnable]].writes(r)
+
+      case r: BallClock.NotRunnable =>
+        ???
+    }
+  }
 }
