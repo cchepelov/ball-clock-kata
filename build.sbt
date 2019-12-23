@@ -13,6 +13,7 @@ scalacOptions ++= Seq(
   // Use @silent annotations to consciously silent out warnings if needed
   // (https://github.com/ghik/silencer).
   "-Xfatal-warnings",
+  "-deprecation",
 )
 
 val silencerVersion = "1.4.4"

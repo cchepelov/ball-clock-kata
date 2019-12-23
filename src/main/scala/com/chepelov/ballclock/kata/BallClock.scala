@@ -1,6 +1,6 @@
 package com.chepelov.ballclock.kata
 
-import java.time.Duration
+import java.time.{Duration, LocalTime, OffsetDateTime, ZoneOffset}
 
 import zio.{IO, Schedule, UIO, ZIO}
 import cats.Foldable
@@ -22,25 +22,84 @@ sealed abstract class BallClock {
    * @return the new state of the clock
    */
   def load(ballCount: Int): IO[KataError, BallClock.Runnable] = {
+    validateSizes(ballCount) {
+      val newBalls = makeBalls(ballCount)
+
+      for {
+        newEnd <- BallClock.feedBallsIntoMain(end, newBalls)
+      } yield {
+        BallClock.Runnable(stages = this.stages, end = newEnd)
+      }
+    }
+  }
+
+  private def makeBalls(ballCount: Int) = {
+    val maxExistingBall = (end :: stages).flatMap(_.contents.to[List].maximumOption).maximumOption
+
+    val firstBallId = maxExistingBall.map(_.id).filterNot(_ < 0).getOrElse(0) // we locate the first ID of the first non-static ball
+    val newBalls = (0 until ballCount).map(num => Ball(firstBallId + 1 + num))
+    newBalls.to[List]
+  }
+
+  private def validateSizes(ballCount: Int)(innerOp: => IO[KataError, BallClock.Runnable]): IO[KataError, BallClock.Runnable] = {
     import BallClock.MaxCapacity
 
     val (existingCapacity, existingSize, staticSize) =
-      Monoid[(Int, Int, Int)].combineAll(stages.map(st => (st.capacity, st.size, st.static.size)))
+      Monoid[(Int, Int, Int)].combineAll(
+        (1, 0, 0) ::  stages.map(st => (st.capacity - st.static.size - 1, st.size - st.static.size, st.static.size)))
 
-    if ((existingSize + ballCount) < (existingCapacity - staticSize)) {
+    if ((existingSize + ballCount) < existingCapacity) {
       IO.fail(KataError.InsufficientBallCount(ballCount, existingCapacity, existingSize))
-    } else if ((existingSize + ballCount) > (MaxCapacity + staticSize)) {
+    } else if ((existingSize + ballCount) > MaxCapacity) {
       IO.fail(KataError.ExcessiveBallCount(ballCount, existingCapacity, existingSize, MaxCapacity + staticSize))
     } else {
+      innerOp
+    }
+  }
 
-      val maxExistingBall = (end :: stages).flatMap(_.contents.to[List].maximumOption).maximumOption
 
-      val newBalls = (maxExistingBall.map(_.id).getOrElse(0) until ballCount).map(num => Ball(num + 1))
+  def loadWithMidnight(ballCount: Int): IO[KataError, BallClock.Runnable] = {
+    val time = LocalTime.of(0, 0)
+    loadWithCurrentTime(time, ballCount)
+  }
+
+  def loadWithCurrentTime(time: LocalTime, ballCount: Int): IO[KataError, BallClock.Runnable] = {
+    validateSizes(ballCount) {
+
+      val minutesOfHour = time.getMinute
+      val hourOfDay = time.getHour
+
+      val minutesInDay = minutesOfHour + (60 * hourOfDay)
+
+      val parceledOut = stages.scanLeft( (List.empty[Ball], makeBalls(ballCount), minutesInDay)) { case ((_, balls, counter), stage) =>
+        val toTake = stage.capacity - stage.static.size
+
+        val desiredValue = counter % toTake
+
+        val splitPos = {
+          val rawpos = (counter - stage.static.size) % toTake
+          if (rawpos < 0) {
+            rawpos + toTake
+          }  else {
+            rawpos
+          }
+        }
+        val (takenBalls, leftBalls) = balls.splitAt( splitPos )
+        val newCounter = (counter - stage.static.size) / toTake
+
+        (takenBalls, leftBalls, newCounter)
+      }
+        .tail // the first record is just the start, not useful.
+
+      val filledStages = stages.zip(parceledOut).map { case (stage, (taken, _, _)) => stage.copy(moving = taken.reverse) }
+
+      val (_, finalBalls, _) = parceledOut.last
+
 
       for {
-        newEnd <- BallClock.feedBallsIntoMain(end, newBalls.to[List])
+        newEnd <- BallClock.feedBallsIntoMain(end, finalBalls)
       } yield {
-        BallClock.Runnable(stages = this.stages, end = newEnd)
+        BallClock.Runnable(stages = filledStages, end = newEnd)
       }
     }
   }
@@ -97,14 +156,17 @@ object BallClock {
     stages match {
       case Nil =>
         // everything that might be moving, is moving. Time to collect every ball hurtling towards
-        // the static accumulator. Starting with the ball moving from the last tilt, if any.
-        val toReceive = maybeBall match {
-          case Some(ball) => ball :: towardsEnd.to[List]
-          case None => towardsEnd.to[List]
-        }
+        // the static accumulator. ENDING with the ball moving from the last tilt, if any, as this is what the text
+        // specifies.
 
         for {
-          newEnd <- feedBallsIntoMain(end, toReceive)
+          tempEnd <- feedBallsIntoMain(end, towardsEnd.to[List])
+          newEnd <- maybeBall match {
+            case None =>
+              UIO(tempEnd)
+            case Some(ball) =>
+              feedBallsIntoMain(tempEnd, ball :: Nil) // the ball that started it all
+          }
         } yield {
           (newStagesReversed.reverse, newEnd)
         }
@@ -125,10 +187,7 @@ object BallClock {
                 stageMotion(otherStages,
                   Some(newMovingBall),
                   end,
-                  //towardsEnd ++ newRejectedBalls,
-                   newRejectedBalls ++ towardsEnd,
-                  /* FIXME: in which order are rejected balls received in case of a multiple tilt event ?
-                  *   BallClock geometry is important here! */
+                  towardsEnd ++ newRejectedBalls,
                   newCurrentStage :: newStagesReversed)
             }
         }
@@ -153,6 +212,21 @@ object BallClock {
 
 
   case class Runnable(stages: List[Accumulator.Tilting], end: Accumulator.Static.NonEmpty) extends BallClock {
+    def runCycles(minutes: Int): IO[KataError, BallClock.Runnable] = {
+      if (minutes == 0) {
+        UIO(this)
+      } else if (minutes == 1) {
+        this.tick
+      } else {
+        val schedule = Schedule.recurs(minutes - 1) *> runUntilLikeStartOrError(this, (_: Runnable).tick, (_: Runnable) == this)
+
+        val result = ZIO.unit.repeat(schedule)
+          .flatMap(x => IO.fromEither(x))
+
+        result
+      }
+    }
+
     def countUntilCycle(): IO[KataError, Duration] = {
 
 
@@ -193,7 +267,7 @@ object BallClock {
     NotRunnable(
       Accumulator.Tilting("Min", Nil, 5) ::
         Accumulator.Tilting("5Min", Nil, 12) ::
-        Accumulator.Tilting("Hour", Nil, Ball(-1) :: Nil, 12) ::
+        Accumulator.Tilting("Hour", Nil, Ball(-1) :: Nil, 13) ::
       Nil,
       Accumulator.Static.Empty("Main")
     )
