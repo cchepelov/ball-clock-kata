@@ -5,7 +5,7 @@ import zio.{IO, UIO}
 /**
  * This class represents a ball accumulator, with optional tilting.
  */
-abstract class Accumulator {
+sealed abstract class Accumulator {
   def name: String
   def contents: Seq[Ball]
   def size: Int
@@ -29,7 +29,7 @@ object Accumulator {
    * Contrary to other accumulator, it is possible to take the ball at the head
    */
   abstract class Static extends Accumulator {
-    override def receive(ball: Ball): (Accumulator.Static, None.type)
+    override def receive(ball: Ball): (Accumulator.Static.NonEmpty, None.type)
 
     /**
      * Attempt to take the first ball, returning an error effect if necessary
