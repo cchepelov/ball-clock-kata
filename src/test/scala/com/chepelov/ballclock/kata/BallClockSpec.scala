@@ -321,8 +321,8 @@ class BallClockSpec extends  AsyncFlatSpec with  Matchers with ZioTestAdapter wi
     }
   }
 
-  it should "show the expected state 325 minutes after the zero starting-point with 30 marbles" ignore zTest {
-    /* this test was picked up from the JSON clause; not sure whether the data shown was actually meant to be correct */
+  it should "show the expected state 325 minutes after the zero starting-point with 30 marbles" in zTest {
+    /* this test was picked up from the JSON clause */
 
     for {
       clock <- BallClock().load(30)
@@ -334,15 +334,14 @@ class BallClockSpec extends  AsyncFlatSpec with  Matchers with ZioTestAdapter wi
 
       val fiveMins = clock325.stages(1)
       fiveMins.static shouldBe empty
-      fiveMins.contents should contain theSameElementsInOrderAs (
-        Ball(7) :: Ball(3) :: Ball(25) :: Ball(13) :: Ball(22) :: Nil)
+      fiveMins.contents.map(_.id) should contain theSameElementsInOrderAs ( 7 :: 3 :: 25 :: 13 :: 22 :: Nil)
 
       val hours = clock325.stages(2)
       hours.static should contain theSameElementsInOrderAs (Ball(-1) :: Nil)
-      hours.contents should contain theSameElementsInOrderAs (Ball(15) :: Ball(4) :: Ball(17) :: Ball(12) :: Ball(6) :: Ball(-1) :: Nil)
+      hours.contents.map(_.id) should contain theSameElementsInOrderAs (15 :: 4 :: 17 :: 12 :: 6 :: -1 :: Nil)
 
       clock325.end.contents.map(_.id) should contain theSameElementsInOrderAs (
-        11 :: 5 :: 26 :: 18 :: 2 :: 30 :: 19 :: 8 :: 24 :: 10 :: 29 :: 20 :: 16 :: 21 :: 28 :: 1 :: 23 :: 14 :: 27 :: 9 :: Nil
+        9 :: 27 :: 14 :: 23 :: 1 :: 28 :: 21 :: 16 :: 20 :: 29 :: 10 :: 24 :: 8 :: 19 :: 30 :: 2 :: 18 :: 26 :: 5 :: 11 :: Nil
         )
     }
   }
